@@ -3,7 +3,6 @@ import os
 import re
 import hmac
 import hashlib
-import time
 import asyncio
 from urllib.parse import quote
 
@@ -20,7 +19,9 @@ STREAM_SECRET = os.environ["STREAM_SECRET"].encode()
 
 MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024
 CHUNK_SIZE = 512 * 1024
-LINK_VALIDITY = 7 * 24 * 60 * 60
+
+# 0 = NEVER EXPIRE
+LINK_VALIDITY = 0
 
 ALLOWED_EXTENSIONS = {".mp4", ".mkv", ".webm"}
 
@@ -42,7 +43,8 @@ def verify_signature(chat_id, message_id, expiry, token):
     try:
         expiry = int(expiry)
 
-        if expiry < int(time.time()):
+        # Expiry 0 means permanent link
+        if expiry != 0 and expiry < int(__import__("time").time()):
             return False
 
         expected = create_signature(
@@ -118,9 +120,9 @@ def get_file_info(message):
     }
 
 
-# CREATE STREAM AND DOWNLOAD LINKS
+# CREATE PERMANENT STREAM AND DOWNLOAD LINKS
 def make_links(chat_id, message_id):
-    expiry = int(time.time()) + LINK_VALIDITY
+    expiry = 0
 
     token = create_signature(
         chat_id,
@@ -146,9 +148,10 @@ async def welcome(event):
     await event.reply(
         "🎬 PLAY MAX FILE BOT\n\n"
         "Send an authorized MP4, MKV, or WEBM video.\n"
-        "I will create a Streaming Link and a Download Link.\n\n"
+        "I will create a Permanent Streaming Link "
+        "and a Permanent Download Link.\n\n"
         "Maximum size: 2 GB\n"
-        "Link validity: 7 days\n\n"
+        "Link validity: No Expiry\n\n"
         "Use only files you own or are authorized to share."
     )
 
@@ -183,7 +186,7 @@ async def receive_file(event):
         "✅ PLAY MAX: File received!\n\n"
         f"📁 File: {info['name']}\n"
         f"📦 Size: {info['size'] / (1024 ** 2):.2f} MB\n"
-        "⏳ Link valid for: 7 days\n\n"
+        "♾️ Link validity: Permanent\n\n"
         f"▶️ Streaming Link:\n{stream_link}\n\n"
         f"⬇️ Download Link:\n{download_link}"
     )
@@ -194,6 +197,7 @@ async def health(request):
     return web.json_response({
         "status": "online",
         "service": "PLAY MAX FILE SERVER",
+        "link_validity": "permanent",
         "supported_formats": sorted(ALLOWED_EXTENSIONS)
     })
 
@@ -280,7 +284,6 @@ async def serve_file(request):
     )
 
     is_download = request.path.endswith("/download")
-
     disposition = "attachment" if is_download else "inline"
 
     headers = {
